@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# notifies people a set number of days before expiry, once via email
+
+# open a kerberos ticket using keytab authentication
+# the following keytab file was made using ktutil with rc4-hmac
+
+/usr/bin/kinit <username@DOMAIN> -k -t <location of keytab file>
+
+# how many days before expiry? at which point a single email should be sent out
+
+cd /tmp
+THENUMBEROFDAYS=7
+
+#queries the ldap server for whatever group you want, or search parameters you want to use
+# grepping memberUid for the group you want and piping to awk results in a list of users
+USERLIST=$(ldapsearch -x -b cn=users,cn=accounts,dc=<DOMAIN> | grep uid: | awk '{print $2}')
+
+# start the main loop
+for USER in $USERLIST;
+do
+# gets todays date in the same format as ipa
+TODAYSDATE=$(date +"%Y%m%d")
+echo "Checking Expiry For $USER"
+
+# gets date, removes time uses cut to get only first 8 characters of date
+EXPIRYDATE=$(ipa user-show $USER --all | grep krbpasswordexpiration | awk '{print $2}' | cut -c 1-8)
+
+# using date command to convert to a proper date format for the subtraction of days left
+CALCEXPIRY=$(date -d "$EXPIRYDATE" +%j)
+CALCTODAY=$(date -d "$TODAYSDATE" +%j)
+DAYSLEFT=$(expr $CALCEXPIRY - $CALCTODAY)
+
+echo "$USER has $DAYSLEFT left"
+# send out an email if it matches the specified number of days left
+if [ $DAYSLEFT -le $THENUMBEROFDAYS ];
+then
+
+# create the email content
+echo "Your Linux password is about to expire in $DAYSLEFT days." >> $USER.temp
+echo " " >> $USER.temp
+echo "From, " >> $USER.temp
+echo "Your friendly neighborhood sysadmin" >> $USER.temp
+
+# send the email out
+mailx -s "$USER, Your Linux password is about to expire!" $USER@<DOMAIN> < $USER.temp
+# delete content file
+rm -rf $USER.temp
+fi
+
+done
